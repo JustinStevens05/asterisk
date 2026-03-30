@@ -1,0 +1,543 @@
+<!-- this code was written with chatgpt -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Asterisk</title>
+    <style>
+        body {
+            margin: 0;
+            background: #cfcfcf;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .window {
+            background: #000;
+            border: 2px solid #999;
+            box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #555;
+            width: 620px;
+            padding: 10px 12px 14px;
+        }
+
+        .titlebar {
+            background: #1d3fa8;
+            color: white;
+            font-weight: bold;
+            padding: 4px 8px;
+            margin: -10px -12px 10px -12px;
+            font-size: 18px;
+        }
+
+        .hud {
+            color: white;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        .hud-controls {
+            font-size: 16px;
+            margin-bottom: 6px;
+            color: #ffd700;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background: #000;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 20px;
+            margin-top: 12px;
+            justify-content: flex-start;
+        }
+
+        button {
+            width: 120px;
+            height: 50px;
+            font-size: 16px;
+            border: 2px solid #999;
+            background: #ddd;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #eee;
+        }
+
+        .footer-message {
+            color: white;
+            margin-top: 10px;
+            min-height: 24px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <div class="titlebar">Asterisk</div>
+
+        <div class="hud">
+            <div class="hud-top">
+                <div id="levelText">Level 1</div>
+                <div id="recordText">Record: 0</div>
+            </div>
+
+            <div class="hud-controls">
+                <div>Hold ENTER to Rise | Release to Fall</div>
+            </div>
+        </div>
+
+        <canvas id="gameCanvas" width="560" height="380"></canvas>
+
+        <div class="buttons">
+            <button id="startBtn">Start Game</button>
+        </div>
+
+        <div class="footer-message" id="messageText">
+            Reach the opening in the right wall.
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        const levelText = document.getElementById("levelText");
+        const recordText = document.getElementById("recordText");
+        const messageText = document.getElementById("messageText");
+        const startBtn = document.getElementById("startBtn");
+
+        const GAME_WIDTH = canvas.width;
+        const GAME_HEIGHT = canvas.height;
+
+        const FIELD_LEFT = 16;
+        const FIELD_TOP = 16;
+        const FIELD_RIGHT = GAME_WIDTH - 16;
+        const FIELD_BOTTOM = GAME_HEIGHT - 16;
+
+        const PLAYER_START_X = FIELD_LEFT + 24;
+        const PLAYER_START_Y = Math.floor(GAME_HEIGHT / 2);
+
+        const PLAYER_SPEED_X = 1;
+        const PLAYER_SPEED_Y = 0.7;
+        const PLAYER_RADIUS = 2;
+
+        const GAP_HEIGHT = 44;
+        const ASTERISK_COUNT_BASE = 5;
+        const ASTERISK_COUNT_PER_LEVEL = 5;
+        const SAFE_ZONE_RADIUS = 40;
+        const TRAIL_MAX_POINTS = 1200;
+        const COUNTDOWN_DURATION = 3000;
+
+        let countdownActive = false;
+        let countdownValue = 3;
+        let countdownStartTime = 0;
+
+        let trailColor = "yellow";
+
+        let animationId = null;
+        let gameActive = false;
+        let gameStarted = false;
+        let enterPressed = false;
+
+        let level = 1;
+        let record = 1;
+        let wallGapY = 0;
+        let asteroids = [];
+
+        const player = {
+            headX: PLAYER_START_X,
+            headY: PLAYER_START_Y,
+            trail: []
+        };
+
+        function updateHud() {
+            levelText.textContent = `Level ${level}`;
+            recordText.textContent = `Record: ${record}`;
+        }
+
+        function resetPlayer() {
+            player.headX = PLAYER_START_X;
+            player.headY = PLAYER_START_Y;
+            player.trail = [{
+                x: player.headX,
+                y: player.headY
+            }];
+        }
+
+        function getRandomColor() {
+            const colors = [
+                "#FFD700", // gold
+                "#00FFFF", // cyan
+                "#FF69B4", // pink
+                "#00FF00", // lime
+                "#FFA500", // orange
+                "#FFFFFF", // white
+                "#FF4444", // red
+                "#66CCFF", // light blue
+                "#CC66FF"  // purple
+            ];
+
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function chooseWallGap() {
+            const minGapTop = FIELD_TOP + 20;
+            const maxGapTop = FIELD_BOTTOM - GAP_HEIGHT - 20;
+            wallGapY = minGapTop + Math.random() * (maxGapTop - minGapTop);
+        }
+
+        function pointInSafeStartZone(x, y) {
+            return Math.abs(x - PLAYER_START_X) < SAFE_ZONE_RADIUS &&
+                   Math.abs(y - PLAYER_START_Y) < SAFE_ZONE_RADIUS;
+        }
+
+        function pointInGoalGapZone(x, y) {
+            return Math.abs(x - FIELD_RIGHT) < 30 &&
+                   y >= wallGapY - 10 &&
+                   y <= wallGapY + GAP_HEIGHT + 10;
+        }
+
+        function generateAsteroids() {
+            asteroids = [];
+            const count = ASTERISK_COUNT_BASE + (level - 1) * ASTERISK_COUNT_PER_LEVEL;
+            let attempts = 0;
+
+            while (asteroids.length < count && attempts < count * 60) {
+                attempts++;
+            
+                const x = FIELD_LEFT + 20 + Math.random() * (FIELD_RIGHT - FIELD_LEFT - 60);
+                const y = FIELD_TOP + 20 + Math.random() * (FIELD_BOTTOM - FIELD_TOP - 60);
+            
+                if (pointInSafeStartZone(x, y)) continue;
+                if (pointInGoalGapZone(x, y)) continue;
+            
+                let tooClose = false;
+                for (const block of asteroids) {
+                    const dx = block.x - x;
+                    const dy = block.y - y;
+                    if (Math.sqrt(dx * dx + dy * dy) < 20) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+            
+                if (!tooClose) {
+                    asteroids.push({
+                        x,
+                        y
+                    });
+                }
+            }
+        }
+
+        function buildLevel() {
+            chooseWallGap();
+            generateAsteroids();
+            resetPlayer();
+
+            trailColor = getRandomColor();
+
+            countdownActive = true;
+            countdownValue = 3;
+            countdownStartTime = performance.now();
+
+            updateHud();
+        }
+
+        function updateCountdown() {
+            if (!countdownActive) return;
+
+            const elapsed = performance.now() - countdownStartTime;
+            const remaining = COUNTDOWN_DURATION - elapsed;
+
+            if (remaining <= 0) {
+                countdownActive = false;
+                countdownValue = 0;
+                messageText.textContent = `Level ${level} - Go!`;
+                return;
+            }
+        
+            countdownValue = Math.ceil(remaining / 1000);
+            messageText.textContent = `Level ${level} starts in ${countdownValue}`;
+        }
+
+        function startGame() {
+            level = 1;
+            record = Math.max(record, 1);
+            gameActive = true;
+            gameStarted = true;
+            messageText.textContent = "Reach the opening in the right wall.";
+            buildLevel();
+
+            cancelAnimationFrame(animationId);
+            animate();
+        }
+
+        function advanceLevel() {
+            level++;
+            if (level > record) {
+                record = level;
+            }
+            messageText.textContent = `Level ${level}`;
+            buildLevel();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            messageText.textContent = "Game Over - Press SPACE or click Start Game";
+            updateHud();
+            draw();
+        }
+
+        function collidedWithAsteroid() {
+            const size = 5; // approximate block size
+                
+            for (const block of asteroids) {
+                if (
+                    player.headX > block.x - 6 &&
+                    player.headX < block.x + size &&
+                    player.headY > block.y - 6 &&
+                    player.headY < block.y + size
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function collidedWithWall() {
+            if (player.headY <= FIELD_TOP + 2 || player.headY >= FIELD_BOTTOM - 2) {
+                return true;
+            }
+
+            if (player.headX >= FIELD_RIGHT - 2) {
+                const inGap = player.headY >= wallGapY && player.headY <= wallGapY + GAP_HEIGHT;
+                return !inGap;
+            }
+
+            return false;
+        }
+
+        function reachedGoal() {
+            return player.headX >= FIELD_RIGHT - 2 &&
+                   player.headY >= wallGapY &&
+                   player.headY <= wallGapY + GAP_HEIGHT;
+        }
+
+        function updatePlayer() {
+            player.headX += PLAYER_SPEED_X;
+
+            if (enterPressed) {
+                player.headY -= PLAYER_SPEED_Y;
+            } else {
+                player.headY += PLAYER_SPEED_Y;
+            }
+
+            player.trail.push({
+                x: player.headX,
+                y: player.headY
+            });
+
+            if (player.trail.length > TRAIL_MAX_POINTS) {
+                player.trail.shift();
+            }
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            if (countdownActive) {
+                updateCountdown();
+                return;
+            }
+        
+            updatePlayer();
+        
+            if (reachedGoal()) {
+                advanceLevel();
+                return;
+            }
+        
+            if (collidedWithWall() || collidedWithAsteroid()) {
+                gameOver();
+            }
+        }
+
+        function drawCountdownOverlay() {
+            if (!countdownActive || !gameActive) return;
+
+            ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+            ctx.fillRect(FIELD_LEFT + 1, FIELD_TOP + 1, FIELD_RIGHT - FIELD_LEFT - 2, FIELD_BOTTOM - FIELD_TOP - 2);
+
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            ctx.font = "bold 64px Courier New";
+            ctx.fillText(countdownValue, GAME_WIDTH / 2, GAME_HEIGHT / 2);
+
+            ctx.font = "18px Courier New";
+            ctx.fillText("Plan your route", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40);
+            ctx.textAlign = "start";
+        }
+
+        function drawBorderAndGap() {
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.moveTo(FIELD_LEFT, FIELD_TOP);
+            ctx.lineTo(FIELD_RIGHT, FIELD_TOP);
+            ctx.lineTo(FIELD_RIGHT, wallGapY);
+            ctx.moveTo(FIELD_RIGHT, wallGapY + GAP_HEIGHT);
+            ctx.lineTo(FIELD_RIGHT, FIELD_BOTTOM);
+            ctx.lineTo(FIELD_LEFT, FIELD_BOTTOM);
+            ctx.lineTo(FIELD_LEFT, FIELD_TOP);
+            ctx.stroke();
+        }
+
+        function drawAsteroids() {
+            ctx.fillStyle = "white";
+            ctx.font = "18px Courier New";
+
+            const offset = 5; // spacing between characters
+
+            for (const block of asteroids) {
+                const x = block.x;
+                const y = block.y;
+            
+                ctx.fillText("*", x, y);
+                ctx.fillText("*", x + offset, y);
+                ctx.fillText("*", x, y + offset);
+                ctx.fillText("*", x + offset, y + offset);
+            }
+        }
+
+        function drawTrail() {
+            if (player.trail.length < 2) return;
+
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = trailColor;
+            ctx.beginPath();
+            ctx.moveTo(player.trail[0].x, player.trail[0].y);
+
+            for (let i = 1; i < player.trail.length; i++) {
+                ctx.lineTo(player.trail[i].x, player.trail[i].y);
+            }
+
+            ctx.stroke();
+        }
+
+        function drawPlayerHead() {
+            ctx.fillStyle = trailColor;
+            ctx.beginPath();
+            ctx.arc(player.headX, player.headY, PLAYER_RADIUS, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawLevelInsideField() {
+            ctx.fillStyle = "white";
+            ctx.font = "16px Courier New";
+            ctx.fillText(`Level: ${level}`, FIELD_LEFT + 8, FIELD_TOP + 22);
+        }
+
+        function drawStartOverlay() {
+            if (gameStarted) return;
+
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            ctx.font = "22px Courier New";
+            ctx.fillText("ASTERISK", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30);
+
+            ctx.font = "16px Courier New";
+            ctx.fillText("Hold ENTER to rise", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 5);
+            ctx.fillText("Release ENTER to fall", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 28);
+            ctx.fillText("Reach the opening in the right wall", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 51);
+
+            ctx.textAlign = "start";
+        }
+
+        function drawGameOverOverlay() {
+            if (gameActive || !gameStarted) return;
+
+            ctx.fillStyle = "white";
+            ctx.textAlign = "center";
+            ctx.font = "22px Courier New";
+            ctx.fillText("GAME OVER", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 10);
+
+            ctx.font = "16px Courier New";
+            ctx.fillText("Press SPACE to restart", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 18);
+
+            ctx.textAlign = "start";
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            drawBorderAndGap();
+            drawLevelInsideField();
+            drawAsteroids();
+            drawTrail();
+            drawPlayerHead();
+            drawStartOverlay();
+            drawCountdownOverlay();
+            drawGameOverOverlay();
+        }
+
+        function animate() {
+            update();
+            draw();
+
+            if (gameActive) {
+                animationId = requestAnimationFrame(animate);
+            }
+        }
+
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "Enter") {
+                e.preventDefault();
+                enterPressed = true;
+            }
+
+            if (e.code === "Space") {
+                e.preventDefault();
+                if (!gameActive) {
+                    startGame();
+                }
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.code === "Enter") {
+                enterPressed = false;
+            }
+        });
+
+        startBtn.addEventListener("click", () => {
+            if (!gameActive) {
+                startGame();
+            }
+        });
+
+        updateHud();
+        resetPlayer();
+        chooseWallGap();
+        draw();
+    </script>
+</body>
+</html>

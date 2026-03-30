@@ -1,0 +1,382 @@
+<!-- code started with geminis verision edits done by chatgpt -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Asterisk</title>
+    <style>
+        body {
+            margin: 0;
+            background: #cfcfcf;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .window {
+            background: #000;
+            border: 2px solid #999;
+            box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #555;
+            width: 620px;
+            padding: 10px 12px 14px;
+        }
+
+        .titlebar {
+            background: #1d3fa8;
+            color: white;
+            font-weight: bold;
+            padding: 4px 8px;
+            margin: -10px -12px 10px -12px;
+            font-size: 18px;
+        }
+
+        .hud {
+            color: white;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        .hud-controls {
+            display: flex;
+            justify-content: space-between;
+            font-size: 16px;
+            margin-bottom: 6px;
+            color: #ffd700;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background: #000;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 20px;
+            margin-top: 12px;
+            justify-content: flex-start;
+        }
+
+        button {
+            width: 120px;
+            height: 50px;
+            font-size: 16px;
+            border: 2px solid #999;
+            background: #ddd;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #eee;
+        }
+
+        .footer-message {
+            color: white;
+            margin-top: 10px;
+            min-height: 24px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <div class="titlebar">Asterisk</div>
+
+        <div class="hud">
+            <div class="hud-top">
+                <div id="levelText">Level 1</div>
+                <div id="recordText">Record: 0</div>
+            </div>
+
+            <div class="hud-controls">
+                <div>Player 1: Arrow Keys | SPACE to Start / Restart</div>
+            </div>
+        </div>
+
+        <canvas id="gameCanvas" width="560" height="380"></canvas>
+
+        <div class="buttons">
+            <button id="onePlayerBtn">Start Game</button>
+        </div>
+
+        <div class="footer-message" id="messageText">
+            Dodge the asterisks and survive as long as you can.
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        const levelText = document.getElementById("levelText");
+        const recordText = document.getElementById("recordText");
+        const messageText = document.getElementById("messageText");
+        const onePlayerBtn = document.getElementById("onePlayerBtn");
+
+        const GAME_WIDTH = canvas.width;
+        const GAME_HEIGHT = canvas.height;
+
+        const FIELD_LEFT = 16;
+        const FIELD_TOP = 16;
+        const FIELD_RIGHT = GAME_WIDTH - 16;
+        const FIELD_BOTTOM = GAME_HEIGHT - 16;
+
+        let animationId = null;
+        let keys = {};
+        let stars = [];
+        let frameCount = 0;
+        let score = 0;
+        let record = 0;
+        let level = 1;
+        let gameActive = false;
+        let gameStarted = false;
+        let spawnInterval = 8;
+        let starSpeedMin = 1.2;
+        let starSpeedMax = 2.4;
+
+        const player = {
+            x: 60,
+            y: GAME_HEIGHT / 2,
+            size: 16,
+            speed: 3.4
+        };
+
+        window.addEventListener("keydown", (e) => {
+            keys[e.code] = true;
+
+            if (e.code === "Space") {
+                e.preventDefault();
+                if (!gameActive) {
+                    startGame();
+                }
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            keys[e.code] = false;
+        });
+
+        onePlayerBtn.addEventListener("click", () => {
+            startGame();
+        });
+
+        function resetGameState() {
+            stars = [];
+            frameCount = 0;
+            score = 0;
+            level = 1;
+            spawnInterval = 8;
+            starSpeedMin = 1.2;
+            starSpeedMax = 2.4;
+
+            player.x = 60;
+            player.y = GAME_HEIGHT / 2;
+        }
+
+        function startGame() {
+            resetGameState();
+            gameActive = true;
+            gameStarted = true;
+            messageText.textContent = "Survive the starfield.";
+            cancelAnimationFrame(animationId);
+            animate();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            if (score > record) {
+                record = score;
+            }
+            messageText.textContent = "Game Over - Press SPACE to restart";
+            updateHud();
+            draw();
+        }
+
+        function updateHud() {
+            levelText.textContent = `Level ${level}`;
+            recordText.textContent = `Record: ${record}`;
+        }
+
+        function increaseDifficulty() {
+            const newLevel = Math.floor(score / 20) + 1;
+
+            if (newLevel !== level) {
+                level = newLevel;
+                spawnInterval = Math.max(2, 8 - Math.floor((level - 1) * 0.5));
+                starSpeedMin = 1.2 + (level - 1) * 0.25;
+                starSpeedMax = 2.4 + (level - 1) * 0.35;
+                messageText.textContent = `Level ${level}`;
+            }
+        }
+
+        function spawnStar() {
+            const y = FIELD_TOP + Math.random() * (FIELD_BOTTOM - FIELD_TOP);
+            const speed = starSpeedMin + Math.random() * (starSpeedMax - starSpeedMin);
+            const glyph = Math.random() < 0.85 ? "*" : "+";
+
+            stars.push({
+                x: FIELD_RIGHT - 2,
+                y,
+                speed,
+                glyph
+            });
+        }
+
+        function updatePlayer() {
+            if (keys["ArrowUp"]) player.y -= player.speed;
+            if (keys["ArrowDown"]) player.y += player.speed;
+            if (keys["ArrowLeft"]) player.x -= player.speed;
+            if (keys["ArrowRight"]) player.x += player.speed;
+
+            const margin = 8;
+            if (player.x < FIELD_LEFT + margin) player.x = FIELD_LEFT + margin;
+            if (player.x > FIELD_RIGHT - margin) player.x = FIELD_RIGHT - margin;
+            if (player.y < FIELD_TOP + margin) player.y = FIELD_TOP + margin;
+            if (player.y > FIELD_BOTTOM - margin) player.y = FIELD_BOTTOM - margin;
+        }
+
+        function updateStars() {
+            frameCount++;
+
+            if (frameCount % spawnInterval === 0) {
+                spawnStar();
+            }
+
+            for (let i = stars.length - 1; i >= 0; i--) {
+                const star = stars[i];
+                star.x -= star.speed;
+
+                if (checkCollision(player, star)) {
+                    gameOver();
+                    return;
+                }
+
+                if (star.x < FIELD_LEFT - 10) {
+                    stars.splice(i, 1);
+                    score++;
+                    if (score > record) {
+                        record = score;
+                    }
+                    increaseDifficulty();
+                }
+            }
+        }
+
+        function checkCollision(playerObj, starObj) {
+            const dx = Math.abs(playerObj.x - starObj.x);
+            const dy = Math.abs(playerObj.y - starObj.y);
+            return dx < 8 && dy < 8;
+        }
+
+        function update() {
+            if (!gameActive) return;
+            updatePlayer();
+            updateStars();
+            updateHud();
+        }
+
+        function drawBorder() {
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(FIELD_LEFT, FIELD_TOP, FIELD_RIGHT - FIELD_LEFT, FIELD_BOTTOM - FIELD_TOP);
+        }
+
+        function drawStars() {
+            ctx.fillStyle = "white";
+            ctx.font = "18px Courier New";
+            for (const star of stars) {
+                ctx.fillText(star.glyph, star.x, star.y);
+            }
+        }
+
+        function drawPlayer() {
+            ctx.strokeStyle = "yellow";
+            ctx.lineWidth = 2;
+
+            const x = player.x;
+            const y = player.y;
+
+            ctx.beginPath();
+            ctx.moveTo(x - 14, y + 12);
+            ctx.lineTo(x, y);
+            ctx.lineTo(x + 6, y + 5);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x - 2, y - 2);
+            ctx.lineTo(x + 5, y - 7);
+            ctx.stroke();
+        }
+
+        function drawScoreInsideField() {
+            ctx.fillStyle = "white";
+            ctx.font = "16px Courier New";
+            ctx.fillText(`Score: ${score}`, FIELD_LEFT + 8, FIELD_TOP + 22);
+        }
+
+        function drawStartOverlay() {
+            if (gameStarted) return;
+
+            ctx.fillStyle = "white";
+            ctx.font = "22px Courier New";
+            ctx.textAlign = "center";
+            ctx.fillText("ASTERISK", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 20);
+
+            ctx.font = "16px Courier New";
+            ctx.fillText("Use Arrow Keys to move", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 15);
+            ctx.fillText("Press SPACE to start", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40);
+
+            ctx.textAlign = "start";
+        }
+
+        function drawGameOverOverlay() {
+            if (gameActive || !gameStarted) return;
+
+            ctx.fillStyle = "white";
+            ctx.font = "22px Courier New";
+            ctx.textAlign = "center";
+            ctx.fillText("GAME OVER", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 10);
+
+            ctx.font = "16px Courier New";
+            ctx.fillText("Press SPACE to restart", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20);
+
+            ctx.textAlign = "start";
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            drawBorder();
+            drawScoreInsideField();
+            drawStars();
+            drawPlayer();
+            drawStartOverlay();
+            drawGameOverOverlay();
+        }
+
+        function animate() {
+            update();
+            draw();
+
+            if (gameActive) {
+                animationId = requestAnimationFrame(animate);
+            }
+        }
+
+        updateHud();
+        draw();
+    </script>
+</body>
+</html>

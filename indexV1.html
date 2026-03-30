@@ -1,0 +1,208 @@
+<!-- code was written with gemini -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asterisk - Single Player</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #fff;
+            background-color: #000;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            text-align: center;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1 id="score">Score: 0</h1>
+        <p id="message">Hold ENTER to Rise | Release to Fall</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const messageElement = document.getElementById('message');
+
+        // Game Constants & Variables
+        canvas.width = 400;
+        canvas.height = 600;
+
+        let score = 0;
+        let gameActive = false;
+        let difficulty = 1;
+        
+        // Character Properties
+        const character = {
+            x: 50,
+            y: 300,
+            width: 20,
+            height: 20,
+            gravity: 0.4,
+            lift: -0.8,
+            velocity: 0,
+            color: '#00ff00' // Green character
+        };
+
+        // Obstacle Properties
+        let obstacles = [];
+        let frameCount = 0;
+        let spawnRate = 100; // Frames between spawns
+
+        // Input Handling
+        let isEnterPressed = false;
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Enter') {
+                isEnterPressed = true;
+                if (!gameActive) resetGame();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Enter') {
+                isEnterPressed = false;
+            }
+        });
+
+        function resetGame() {
+            score = 0;
+            difficulty = 1;
+            spawnRate = 100;
+            obstacles = [];
+            character.y = 300;
+            character.velocity = 0;
+            gameActive = true;
+            messageElement.innerText = "";
+            animate();
+        }
+
+        function spawnObstacle() {
+            // 2x2 grid of white obstacles (4 squares total)
+            const size = 20;
+            const gap = 5;
+            const startY = Math.random() * (canvas.height - 100) + 50;
+            
+            // Create a 2x2 block of obstacles
+            for (let row = 0; row < 2; row++) {
+                for (let col = 0; col < 2; col++) {
+                    obstacles.push({
+                        x: canvas.width + (col * (size + gap)),
+                        y: startY + (row * (size + gap)),
+                        width: size,
+                        height: size
+                    });
+                }
+            }
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            // Character Physics
+            if (isEnterPressed) {
+                character.velocity += character.lift;
+            } else {
+                character.velocity += character.gravity;
+            }
+            
+            character.y += character.velocity;
+
+            // Boundary Collision
+            if (character.y + character.height > canvas.height || character.y < 0) {
+                gameOver();
+            }
+
+            // Obstacle Logic
+            frameCount++;
+            if (frameCount % Math.max(20, Math.floor(spawnRate)) === 0) {
+                spawnObstacle();
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.x -= (3 * difficulty); // Move left, speed increases with difficulty
+
+                // Collision Detection
+                if (
+                    character.x < obs.x + obs.width &&
+                    character.x + character.width > obs.x &&
+                    character.y < obs.y + obs.height &&
+                    character.y + character.height > obs.y
+                ) {
+                    gameOver();
+                }
+
+                // Remove off-screen obstacles and increase score
+                if (obs.x + obs.width < 0) {
+                    obstacles.splice(i, 1);
+                    // Only count score for the leading edge of a 2x2 block
+                    if (i % 4 === 0) {
+                        score++;
+                        scoreElement.innerText = `Score: ${score}`;
+                        increaseDifficulty();
+                    }
+                }
+            }
+        }
+
+        function increaseDifficulty() {
+            // Every 5 points, increase speed and spawn rate
+            if (score % 5 === 0) {
+                difficulty += 0.1;
+                spawnRate *= 0.95; 
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Character
+            ctx.fillStyle = character.color;
+            ctx.fillRect(character.x, character.y, character.width, character.height);
+
+            // Draw Obstacles
+            ctx.fillStyle = "white";
+            obstacles.forEach(obs => {
+                ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+            });
+        }
+
+        function gameOver() {
+            gameActive = false;
+            messageElement.innerHTML = "GAME OVER<br>Press ENTER to Restart";
+        }
+
+        function animate() {
+            if (!gameActive) return;
+            update();
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        // Initial Draw
+        draw();
+    </script>
+</body>
+</html>
